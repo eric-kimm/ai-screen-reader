@@ -1,0 +1,29 @@
+{
+    "manifest_version": 3,
+    "name": "Accessibility Assistant",
+    "version": "1.0",
+    "description": "Accessibility assistant for screen reader users",
+    "action": {
+      "default_popup": "popup.html"
+    },
+    "background": {
+      "service_worker": "background.js"
+    },
+    "content_scripts": [
+      {
+        "matches": ["<all_urls>"],
+        "js": ["content.js"],
+        "run_at": "document_end"
+      }
+    ],
+    "commands": {
+      "_execute_action": {
+        "suggested_key": {
+          "default": "Alt+Shift+A"
+        },
+        "description": "Open accessibility assistant"
+      }
+    },
+    "permissions": ["storage", "activeTab", "scripting"],
+    "host_permissions": ["<all_urls>"]
+  }
