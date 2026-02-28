@@ -1,1 +1,1 @@
-# medical-analyzer
+# ai-screen-reader
