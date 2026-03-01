@@ -404,6 +404,141 @@ function createPanel() {
       catch (e) { return href; }
     }
   
+    // Walk the entire DOM tree and extract all readable text with structure
+    function extractAllContent(node, depth) {
+      if (!node) return '';
+      depth = depth || 0;
+  
+      // Skip hidden elements
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const style = node.getAttribute('style') || '';
+        if (style.includes('display:none') || style.includes('display: none') ||
+            style.includes('visibility:hidden') || style.includes('visibility: hidden')) {
+          return '';
+        }
+        const ariaHidden = node.getAttribute('aria-hidden');
+        if (ariaHidden === 'true') return '';
+      }
+  
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent.trim();
+        return text ? text : '';
+      }
+  
+      if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  
+      const tag = node.tagName.toLowerCase();
+  
+      // Skip these entirely
+      const skipTags = ['script', 'style', 'noscript', 'svg', 'head'];
+      if (skipTags.includes(tag)) return '';
+  
+      const children = [...node.childNodes]
+        .map(n => extractAllContent(n, depth + 1))
+        .filter(Boolean);
+  
+      const childText = children.join(' ').replace(/\s+/g, ' ').trim();
+      if (!childText) return '';
+  
+      // Format based on tag type
+      switch (tag) {
+        case 'h1': return '\n# ' + childText + '\n';
+        case 'h2': return '\n## ' + childText + '\n';
+        case 'h3': return '\n### ' + childText + '\n';
+        case 'h4':
+        case 'h5':
+        case 'h6': return '\n#### ' + childText + '\n';
+  
+        case 'p': return '\n' + childText + '\n';
+        case 'br': return '\n';
+  
+        case 'li': return '\n- ' + childText;
+        case 'ul':
+        case 'ol': return '\n' + childText + '\n';
+  
+        case 'strong':
+        case 'b': return '**' + childText + '**';
+  
+        case 'em':
+        case 'i': return '_' + childText + '_';
+  
+        case 'code': return '`' + childText + '`';
+        case 'pre': return '\n```\n' + childText + '\n```\n';
+  
+        case 'blockquote': return '\n> ' + childText + '\n';
+  
+        // Tables — preserve structure
+        case 'th': return '[' + childText + ']';
+        case 'td': return childText;
+        case 'tr': {
+          const cells = [...node.children].map(td => {
+            const t = td.textContent.trim();
+            return t;
+          }).filter(Boolean);
+          return '\n| ' + cells.join(' | ') + ' |';
+        }
+        case 'table': {
+          const rows = [...node.querySelectorAll('tr')].map(tr => {
+            const cells = [...tr.children].map(td => td.textContent.trim()).filter(Boolean);
+            return '| ' + cells.join(' | ') + ' |';
+          });
+          return '\n' + rows.join('\n') + '\n';
+        }
+  
+        // Spans and divs — pass through but keep text
+        case 'span':
+        case 'div':
+        case 'section':
+        case 'article':
+        case 'main':
+        case 'aside':
+        case 'header':
+        case 'footer': return childText;
+  
+        // Definition lists
+        case 'dt': return '\n**' + childText + '**';
+        case 'dd': return '\n  ' + childText;
+        case 'dl': return '\n' + childText + '\n';
+  
+        // Labels and data elements
+        case 'label': return '\n[Label: ' + childText + ']';
+        case 'caption': return '\n[Caption: ' + childText + ']';
+        case 'figcaption': return '\n[Fig: ' + childText + ']';
+        case 'time': return childText;
+        case 'abbr': return childText + (node.getAttribute('title') ? ' (' + node.getAttribute('title') + ')' : '');
+  
+        // Form elements — show their current value/state
+        case 'input': {
+          const type = node.getAttribute('type') || 'text';
+          const val = node.getAttribute('value') || '';
+          const placeholder = node.getAttribute('placeholder') || '';
+          const labelText = getLabel(node) || placeholder || type;
+          if (type === 'hidden') return '';
+          if (type === 'checkbox' || type === 'radio') {
+            const checked = node.hasAttribute('checked') ? '✓' : '○';
+            return ' ' + checked + ' ' + labelText;
+          }
+          return '[Input: ' + labelText + (val ? ' = "' + val + '"' : '') + ']';
+        }
+        case 'textarea': {
+          const labelText = getLabel(node) || 'textarea';
+          return '[Textarea: ' + labelText + ']';
+        }
+        case 'select': {
+          const labelText = getLabel(node) || 'select';
+          const opts = [...node.options].map(o => o.text).join(', ');
+          return '[Select: ' + labelText + ' (' + opts + ')]';
+        }
+        case 'button': return '[Button: ' + childText + ']';
+        case 'a': {
+          const href = resolveUrl(node.getAttribute('href'));
+          return childText + (href ? ' (' + href + ')' : '');
+        }
+  
+        default: return childText;
+      }
+    }
+  
     const context = {
       url,
       title: doc.title,
@@ -411,8 +546,16 @@ function createPanel() {
       interactive: [],
       forms: [],
       inlineLinks: [],
+      pageContent: '',   // 👈 new — full readable content
     };
   
+    // Full content extraction
+    context.pageContent = extractAllContent(doc.body)
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/  +/g, ' ')
+      .trim();
+  
+    // Sections
     doc.querySelectorAll('h1, h2, h3, h4, main, article, section, header').forEach(el => {
       const text = el.textContent.trim().slice(0, 120);
       if (text) {
@@ -424,6 +567,7 @@ function createPanel() {
       }
     });
   
+    // Inline links
     doc.querySelectorAll('a[href]').forEach(el => {
       const parent = el.parentElement;
       if (!parent) return;
@@ -445,6 +589,7 @@ function createPanel() {
       }
     });
   
+    // Interactive elements
     const interactiveSelectors = [
       'button', 'a[href]', 'input', 'textarea', 'select',
       '[role="button"]', '[role="tab"]', '[role="menuitem"]',
@@ -473,6 +618,7 @@ function createPanel() {
       context.interactive.push(item);
     });
   
+    // Forms
     doc.querySelectorAll('form').forEach(form => {
       const fields = [];
       form.querySelectorAll('input, textarea, select, button').forEach(el => {
@@ -497,60 +643,125 @@ function createPanel() {
   }
   
   function formatContextForModel(context) {
-    const sections = context.sections
-      .map(s => '[' + s.tag + '] "' + s.text + '" → ' + s.selector)
-      .join('\n');
+
+    // Universal noise filters
   
+    const isUselessHref = (href) => {
+      if (!href) return true;
+      if (href.endsWith('#')) return true;
+      if (href.includes('grades#')) return true;
+      if (href.startsWith('javascript:')) return true;
+      return false;
+    };
+  
+    const isUselessElement = (el) => {
+      // Skip presentation/decorative elements
+      if (el.type === 'presentation') return true;
+      // Skip elements whose label is just a number or single character
+      if (/^[\d\s]$/.test(el.label?.trim())) return true;
+      // Skip span wrappers that aren't real controls
+      if (el.tag === 'span' && !['button', 'checkbox', 'radio', 'switch', 'tab'].includes(el.type)) return true;
+      // Skip extension's own elements
+      if ((el.selector || '').includes('a11y-')) return true;
+      return false;
+    };
+  
+    // Deduplicate — if an element appears in both interactive and inlineLinks, keep only interactive
+    const interactiveSelectors = new Set(context.interactive.map(el => el.selector));
+  
+    // Format interactive elements more concisely ---
     const interactive = context.interactive
+      .filter(el => !isUselessElement(el))
       .map(el => {
-        const type = el.type ? '[' + el.type + ']' : '';
-        let line = '[' + el.tag + type + '] "' + el.label + '" → ' + el.selector;
-        if (el.options) line += '\n  options: ' + el.options.map(o => '"' + o.text + '" (' + o.value + ')').join(', ');
-        if (el.href) line += ' (href: ' + el.href + ')';
+        // Simplify tag display — only show type if it adds information
+        const meaningfulTypes = ['checkbox', 'radio', 'submit', 'password', 'email', 'number', 'file', 'tab', 'switch'];
+        const showType = el.type && meaningfulTypes.includes(el.type);
+        const tagStr = showType ? el.tag + '[' + el.type + ']' : el.tag;
+  
+        let line = '[' + tagStr + '] "' + el.label + '" → ' + el.selector;
+  
+        // Only show href if it's meaningful
+        if (el.href && !isUselessHref(el.href)) {
+          line += ' → ' + el.href;
+        }
+  
+        // Options for selects
+        if (el.options && el.options.length > 0) {
+          line += '\n  options: ' + el.options.map(o => o.text).join(', ');
+        }
+  
+        // Current value if set
+        if (el.currentValue) {
+          line += '\n  value: "' + el.currentValue + '"';
+        }
+  
         return line;
       })
       .join('\n');
   
+    // Format inline links concisely, skip duplicates and useless hrefs ---
     const inlineLinks = context.inlineLinks
-      .map(link => {
-        return '"' + link.text + '" → ' + link.href + '\n' +
-               '  selector: ' + link.selector + '\n' +
-               '  context: "' + link.context + '"';
-      })
-      .join('\n\n');
+      .filter(link => !interactiveSelectors.has(link.selector))
+      .filter(link => !isUselessHref(link.href))
+      .filter(link => link.text && link.text.length > 1)
+      .map(link => '"' + link.text + '" → ' + link.href)
+      .join('\n');
   
+    // Format forms, skip hidden/template ones ---
     const forms = context.forms
+      .filter(f => {
+        // Skip forms with no visible fields
+        const visibleFields = f.fields.filter(field =>
+          field.type !== 'hidden' && !isUselessElement(field)
+        );
+        return visibleFields.length > 0;
+      })
       .map(f => {
         const fields = f.fields
+          .filter(field => field.type !== 'hidden' && !isUselessElement(field))
           .map(field => {
-            const type = field.type ? '[' + field.type + ']' : '';
+            const meaningfulTypes = ['checkbox', 'radio', 'submit', 'password', 'email', 'number', 'file'];
+            const showType = field.type && meaningfulTypes.includes(field.type);
+            const tagStr = showType ? field.tag + '[' + field.type + ']' : field.tag;
             const label = field.label ?? field.name ?? 'unlabeled';
-            const req = field.required ? ' (required)' : '';
-            return '  [' + field.tag + type + '] "' + label + '" → ' + field.selector + req;
+            const req = field.required ? ' *' : '';
+            return '  [' + tagStr + '] "' + label + '" → ' + field.selector + req;
           })
           .join('\n');
-        return 'Form → ' + f.selector + ' (action: ' + f.action + ', method: ' + f.method + ')\n' + fields;
+        const action = f.action ? ' → ' + f.action : '';
+        return '[form] ' + f.selector + action + '\n' + fields;
       })
       .join('\n\n');
   
-    return (
-      'PAGE CONTEXT\n' +
-      '============\n' +
-      'URL: ' + context.url + '\n' +
-      'Title: ' + context.title + '\n\n' +
-      'PAGE SECTIONS\n' +
-      '-\n' +
-      sections + '\n\n' +
-      'INTERACTIVE ELEMENTS\n' +
-      '\n' +
-      interactive + '\n\n' +
-      'INLINE LINKS\n' +
-      '\n' +
-      inlineLinks + '\n\n' +
-      'FORMS\n' +
-      '-\n' +
-      forms
-    );
+    // Page sections (keep as-is, already clean) ---
+    const sections = context.sections
+      .map(s => '[' + s.tag + '] "' + s.text + '" → ' + s.selector)
+      .join('\n');
+  
+    // Assemble, skip empty sections ---
+    const parts = [
+      'PAGE CONTEXT\n============',
+      'URL: ' + context.url,
+      'Title: ' + context.title,
+    ];
+  
+    if (context.pageContent) {
+      parts.push('\nPAGE CONTENT\n------------\n' + context.pageContent);
+    }
+    if (sections) {
+      parts.push('\nPAGE SECTIONS\n-------------\n' + sections);
+    }
+    if (interactive) {
+      parts.push('\nINTERACTIVE ELEMENTS\n--------------------\n' + interactive);
+    }
+    if (inlineLinks) {
+      parts.push('\nINLINE LINKS\n------------\n' + inlineLinks);
+    }
+    if (forms) {
+      parts.push('\nFORMS\n-----\n' + forms);
+    }
+  
+    return parts.join('\n');
   }
   
   function chunkText(text, maxChars = 12000) {
