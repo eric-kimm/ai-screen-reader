@@ -64,16 +64,25 @@ def health_check():
 # main endpoint to describe the page based on its HTML content
 @app.post("/describe")
 async def describe_page(body: DescribeRequest):
-    prompt = f"""You are a helpful assistant describing a webpage to someone who cannot see it.
-    Speak naturally and conversationally, like you are talking to a person.
-    Do not use bullet points or technical terms.
-    The page content uses these markers: # means heading, [BTN] means button, 
-    [INPUT] means a text field, [LABEL] means a label for a field.
-    Start by saying what kind of page this is, then describe what is on it
-    and what the person can do. Keep it under 80 words.
+    prompt = f"""You are a voice assistant describing a webpage to a blind user.
+    Speak naturally like a friend describing what's on screen out loud.
+
+    Good example:
+    "You're on a personal portfolio page for Aarav Mehta. There's an article called The Quiet Revolution of Everyday Innovation that you can open and read, or browse all articles. You can also check out the owner's Github and LinkedIn. What would you like to do?"
+
+    Bad example (never do this):
+    "You can click on the Continue Reading button. If you want to view all articles you can click View All."
+
+    Rules — read these carefully:
+    - 2-3 sentences maximum, no more
+    - Never say click, button, link, option, tab, menu, or any UI term
+    - Never say "if you want" — just say what they can do directly
+    - Never repeat the same action twice in different words
+    - Use "open", "read", "go to", "explore", "check out"
+    - End with one short natural question like "What would you like to do?"
 
     Page content:
-    {body.html[:3000]}"""
+    {body.html[:4000]}"""
 
     description = call_llm(prompt)
     audio = voice.text_to_speech(description)
