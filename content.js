@@ -1,4 +1,4 @@
-// ---- Panel UI ----
+//  Panel UI 
 
 function createPanel() {
     if (document.getElementById('a11y-assistant-panel')) return;
@@ -143,7 +143,7 @@ function createPanel() {
     return panel;
   }
   
-  // ---- Panel listeners ----
+  //  Panel listeners 
   
   function attachPanelListeners() {
   
@@ -186,18 +186,18 @@ function createPanel() {
   
       chrome.runtime.sendMessage({ action: 'runScript', script }, (response) => {
         if (chrome.runtime.lastError) {
-          showConsoleResult('❌ ' + chrome.runtime.lastError.message, 'error');
+          showConsoleResult('' + chrome.runtime.lastError.message, 'error');
           document.getElementById('a11y-status').textContent = 'Script failed.';
           return;
         }
         if (!response) {
-          showConsoleResult('❌ No response from background.', 'error');
+          showConsoleResult('No response from background.', 'error');
           document.getElementById('a11y-status').textContent = 'No response.';
           return;
         }
         document.getElementById('a11y-status').textContent = response.status === 'ok' ? 'Script ran.' : 'Script error.';
         showConsoleResult(
-          response.status === 'ok' ? '✅ ' + response.value : '❌ ' + response.value,
+          response.status === 'ok' ? '' + response.value : '' + response.value,
           response.status
         );
       });
@@ -219,11 +219,11 @@ function createPanel() {
       }
     });
   
-    // ---- Speech to text ----
+    //  Speech to text 
     setupSpeechToText();
   }
   
-  // ---- Speech to text ----
+  //  Speech to text 
   
   function setupSpeechToText() {
     const voiceDisplay = document.getElementById('a11y-voice-display');
@@ -266,7 +266,7 @@ function createPanel() {
       micIndicator.textContent = 'Press Space to start';
       micIndicator.style.color = '#aaa';
       micIcon.textContent = '🎤';
-      document.getElementById('a11y-status').textContent = '✅ Voice input captured.';
+      document.getElementById('a11y-status').textContent = ' Voice input captured.';
     }
   
     recognition.onresult = (e) => {
@@ -290,7 +290,7 @@ function createPanel() {
         micIndicator.textContent = 'Microphone permission denied';
         micIndicator.style.color = '#f44336';
       } else if (e.error !== 'aborted') {
-        document.getElementById('a11y-status').textContent = '❌ Mic error: ' + e.error;
+        document.getElementById('a11y-status').textContent = ' Mic error: ' + e.error;
       }
       isListening = false;
       micIcon.textContent = '🎤';
@@ -321,7 +321,7 @@ function createPanel() {
     });
   }
   
-  // ---- Voice input callback — put your logic here ----
+  //  Voice input callback — put your logic here 
   
   function onVoiceInputComplete(text) {
     console.log('Voice input received:', text);
@@ -332,7 +332,7 @@ function createPanel() {
     document.getElementById('a11y-script-input').value = '// Voice command: ' + text;
   }
   
-  // ---- Utility functions ----
+  //  Utility functions 
   
   function showConsoleResult(message, type) {
     const resultBox = document.getElementById('a11y-console-result');
@@ -343,7 +343,7 @@ function createPanel() {
     resultBox.style.color = type === 'ok' ? '#d4d4d4' : '#ff6b6b';
   }
   
-  // ---- Extraction ----
+  //  Extraction 
   
   function extractInteractiveContext(html, url) {
     const parser = new DOMParser();
@@ -539,16 +539,16 @@ function createPanel() {
       'URL: ' + context.url + '\n' +
       'Title: ' + context.title + '\n\n' +
       'PAGE SECTIONS\n' +
-      '-------------\n' +
+      '-\n' +
       sections + '\n\n' +
       'INTERACTIVE ELEMENTS\n' +
-      '--------------------\n' +
+      '\n' +
       interactive + '\n\n' +
       'INLINE LINKS\n' +
-      '------------\n' +
+      '\n' +
       inlineLinks + '\n\n' +
       'FORMS\n' +
-      '-----\n' +
+      '-\n' +
       forms
     );
   }
@@ -568,7 +568,7 @@ function createPanel() {
     return chunks;
   }
   
-  // ---- Keyboard shortcut to toggle panel ----
+  //  Keyboard shortcut to toggle panel 
   
   document.addEventListener('keydown', (e) => {
     if (e.shiftKey && e.key === ' ') {
@@ -586,7 +586,7 @@ function createPanel() {
     }
   });
   
-  // ---- Auto-inject on page load ----
+  //  Auto-inject on page load 
   
   window.addEventListener('load', () => {
     createPanel();
