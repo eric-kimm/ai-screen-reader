@@ -299,6 +299,11 @@ function createPanel() {
     };
   
     recognition.onend = () => {
+      console.log('Speech recognition ended', {
+        isListening,
+        finalTranscript,
+      });
+
       // If we stopped intentionally, fire the callback with final text
       if (!isListening && finalTranscript.trim()) {
         onVoiceInputComplete(finalTranscript.trim());
@@ -321,19 +326,68 @@ function createPanel() {
     });
   }
   
-  //  Voice input callback — put your logic here 
+  //  Voice input callback
   
-  function onVoiceInputComplete(text) {
-    console.log('Voice input received:', text);
-    document.getElementById('a11y-status').textContent = '💬 "' + text + '"';
-  
-    // TODO: replace this with your API call
-    // For now just echo it into the script input as a placeholder
-    document.getElementById('a11y-script-input').value = '// Voice command: ' + text;
+  function onVoiceInputComplete(userInput) {
+    console.log('Voice input received:', userInput);
+    const status = document.getElementById('a11y-status');
+    const scriptInput = document.getElementById('a11y-script-input');
+    status.textContent = '💬 "' + userInput + '"';
+    status.textContent = '⏳ Processing voice command...';
+
+    console.log('Sending voice command request', { userInput });
+    fetch('http://127.0.0.1:8000/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        transcript: userInput,
+        html: document.documentElement.outerHTML,
+      }),
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error('API request failed with status ' + response.status);
+        }
+        return response.json(); 
+      })
+      .then((data) => {
+        if (!data || typeof data !== 'object') {
+          throw new Error('Invalid API response.');
+        }
+        console.log("Data Intent:", data.intent)
+
+        if (data.intent === 'question') {
+          const answer = data.answer || 'No answer returned.';
+          status.textContent = answer;
+          showConsoleResult(answer, 'ok');
+          scriptInput.value = '';
+          return;
+        }
+
+        if (data.intent === 'command') {
+          const script = data.script || '';
+          const confirmation = data.confirmation || 'Command ready.';
+
+          scriptInput.value = script;
+          status.textContent = confirmation;
+
+          if (script) {
+            showConsoleResult(confirmation, 'ok');
+          } else {
+            showConsoleResult(confirmation || 'No script returned.', 'error');
+          }
+          return;
+        }
+
+        throw new Error('Unsupported intent.');
+      })
+      .catch((error) => {
+        status.textContent = 'Voice command failed.';
+        showConsoleResult(error.message, 'error');
+      });
   }
   
   //  Utility functions 
-  
   function showConsoleResult(message, type) {
     const resultBox = document.getElementById('a11y-console-result');
     if (!resultBox) return;
