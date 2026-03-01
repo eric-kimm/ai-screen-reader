@@ -84,23 +84,44 @@ async def describe_page(body: DescribeRequest):
 # main endpoint to handle user commands
 @app.post("/command")
 async def handle_command(body: CommandRequest):
-    prompt = f"""You are an accessibility assistant helping a blind user navigate a webpage.
-    The user said: "{body.transcript}"
+    prompt = f"""You are an accessibility assistant for a blind user interacting with a webpage.
 
-    The page content uses these markers: # means heading, [BTN] means button,
-    [INPUT] means a text field, [LABEL] means a label for a field.
+    Your job is to classify the user's request as either:
+    - "command": the user wants the system to do something on the page
+    - "question": the user is asking for information, explanation, or clarification
 
-    Based on the page content below, return ONLY a JSON object with the action to take.
-    No explanation, no markdown, just the JSON object.
+    Rules:
+    - Treat requests to click, open, type, submit, scroll, navigate, select, or read a specific element as "command".
+    - Treat requests asking what, where, why, whether, how, or asking for explanation/summary as "question".
+    - If the user is primarily seeking information, classify as "question" even if the wording is conversational.
+    - If the request is ambiguous, prefer "question".
+    - Use the page HTML as the source of truth.
+    - Return ONLY valid JSON.
+    - Do not include markdown fences or extra text.
 
-    Use one of these formats:
-    {{"action": "click", "target": "exact button or link text"}}
-    {{"action": "fill", "target": "exact input label", "value": "what to type"}}
-    {{"action": "navigate", "target": "url"}}
-    {{"action": "read", "target": "exact element text"}}
+    If intent is "command", return:
+    {{
+    "intent": "command",
+    "action": "click" | "fill" | "navigate" | "read" | "scroll" | "unknown",
+    "target": "specific element text, label, id, or url",
+    "value": "text to type if action is fill, otherwise empty string",
+    "answer": ""
+    }}
 
-    Page content:
-    {body.html[:3000]}"""
+    If intent is "question", return:
+    {{
+    "intent": "question",
+    "action": "",
+    "target": "",
+    "value": "",
+    "answer": "short natural-language answer grounded in the page"
+    }}
+
+    User request:
+    "{body.transcript}"
+
+    Page HTML:
+    {body.html[:3000]}"""""
 
     result = call_llm(prompt)
 
