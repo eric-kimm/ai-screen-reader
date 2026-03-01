@@ -4,6 +4,9 @@ from pydantic import BaseModel
 import requests
 import os
 from dotenv import load_dotenv
+from elevenlabs.client import ElevenLabs
+from elevenlabs.play import play
+from . import voice
 
 load_dotenv()
 
@@ -20,7 +23,6 @@ app.add_middleware(
 # amd vLLM endpoint and model name
 AMD_ENDPOINT = os.getenv("AMD_VLLM_ENDPOINT")
 MODEL = "llava-hf/llava-1.5-7b-hf"
-
 
 class DescribeRequest(BaseModel):
     html: str       # full page html from chrome extension
@@ -65,35 +67,45 @@ async def describe_page(body: DescribeRequest):
     prompt = f"""You are a helpful assistant describing a webpage to someone who cannot see it.
     Speak naturally and conversationally, like you are talking to a person.
     Do not use bullet points or technical terms.
+    The page content uses these markers: # means heading, [BTN] means button, 
+    [INPUT] means a text field, [LABEL] means a label for a field.
     Start by saying what kind of page this is, then describe what is on it
     and what the person can do. Keep it under 80 words.
 
-    Page HTML:
+    Page content:
     {body.html[:3000]}"""
 
     description = call_llm(prompt)
+    audio = voice.text_to_speech(description)
+    play(audio)
     return {"description": description}
 
 
 # main endpoint to handle user commands
 @app.post("/command")
 async def handle_command(body: CommandRequest):
-    prompt = f"""You are an accessibility assistant.
+    prompt = f"""You are an accessibility assistant helping a blind user navigate a webpage.
     The user said: "{body.transcript}"
 
-    Based on this page HTML, return a JSON object with the action to take.
-    Return ONLY valid JSON, nothing else.
+    The page content uses these markers: # means heading, [BTN] means button,
+    [INPUT] means a text field, [LABEL] means a label for a field.
 
-    Format:
-    {{"action": "click", "target": "element text or id"}}
-    {{"action": "fill", "target": "input id or label", "value": "what to type"}}
+    Based on the page content below, return ONLY a JSON object with the action to take.
+    No explanation, no markdown, just the JSON object.
+
+    Use one of these formats:
+    {{"action": "click", "target": "exact button or link text"}}
+    {{"action": "fill", "target": "exact input label", "value": "what to type"}}
     {{"action": "navigate", "target": "url"}}
-    {{"action": "read", "target": "element text or id"}}
+    {{"action": "read", "target": "exact element text"}}
 
-    Page HTML:
+    Page content:
     {body.html[:3000]}"""
 
     result = call_llm(prompt)
+
+    audio = voice.text_to_speech(result)
+    play(audio)
     return {"action": result}
 
 
@@ -101,11 +113,14 @@ async def handle_command(body: CommandRequest):
 @app.post("/element")
 async def describe_element(body: ElementRequest):
     prompt = f"""You are an accessibility assistant for blind users.
-    Describe this HTML element in one short plain english sentence.
+    Describe this in one short plain english sentence.
     Tell the user what it is and what they can do with it.
-    Do not mention HTML or technical terms.
+    Do not use technical terms.
 
     Element: {body.element}"""
 
     description = call_llm(prompt)
+    audio = voice.text_to_speech(description)
+    play(audio)
+
     return {"description": description}
