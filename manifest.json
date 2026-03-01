@@ -4,7 +4,7 @@
     "version": "1.0",
     "description": "Accessibility assistant for screen reader users",
     "action": {
-      "default_popup": "popup.html"
+      "default_title": "Open Accessibility Assistant"
     },
     "background": {
       "service_worker": "background.js"
@@ -24,6 +24,6 @@
         "description": "Open accessibility assistant"
       }
     },
-    "permissions": ["storage", "activeTab", "scripting"],
-    "host_permissions": ["<all_urls>"]
+    "permissions": ["storage", "activeTab", "scripting", "offscreen"],
+    "host_permissions": ["<all_urls>", "https://*/*"]
   }

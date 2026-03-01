@@ -1,5 +1,42 @@
+const micPermissionButton = document.getElementById('mic-permission-btn');
+const micStatus = document.getElementById('mic-status');
+const targetTabStatus = document.getElementById('target-tab-status');
+
+async function getTargetTab() {
+  const response = await chrome.runtime.sendMessage({ action: 'getTargetTab' });
+  if (!response || response.status !== 'ok' || !response.tab) {
+    throw new Error(response?.value || 'No supported browser tab is currently available.');
+  }
+  return response.tab;
+}
+
+async function refreshTargetTabStatus() {
+  if (!targetTabStatus) return;
+
+  try {
+    const tab = await getTargetTab();
+    targetTabStatus.textContent = 'Connected to: ' + (tab.title || tab.url || 'Current tab');
+  } catch (error) {
+    targetTabStatus.textContent = error.message;
+  }
+}
+
+if (micPermissionButton && micStatus) {
+  micPermissionButton.addEventListener('click', async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+      micStatus.textContent = 'Microphone permission granted in extension context.';
+    } catch (error) {
+      micStatus.textContent = 'Microphone permission failed: ' + error.message;
+    }
+  });
+}
+
+refreshTargetTabStatus();
+
 document.getElementById('action-btn').addEventListener('click', async () => {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = await getTargetTab();
     const output = document.getElementById('output');
     const status = document.getElementById('status');
   
@@ -439,38 +476,20 @@ document.getElementById('action-btn').addEventListener('click', async () => {
       showResult('No script provided.', 'error');
       return;
     }
-  
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  
-    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
-      showResult('Cannot run scripts on this page type.', 'error');
-      return;
-    }
-  
+
     try {
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        world: 'MAIN',  
-        func: (script) => {
-          try {
-            const fn = new Function(script);
-            const result = fn();
-  
-            if (result === undefined) return { status: 'ok', value: 'Done (no return value)' };
-            if (result === null) return { status: 'ok', value: 'null' };
-            if (typeof result === 'object') {
-              try { return { status: 'ok', value: JSON.stringify(result, null, 2) }; }
-              catch (e) { return { status: 'ok', value: result.toString() }; }
-            }
-            return { status: 'ok', value: String(result) };
-          } catch (err) {
-            return { status: 'error', value: err.message };
-          }
-        },
-        args: [scriptInput],
+      const tab = await getTargetTab();
+      if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+        showResult('Cannot run scripts on this page type.', 'error');
+        return;
+      }
+
+      const res = await chrome.runtime.sendMessage({
+        action: 'runScript',
+        script: scriptInput,
+        tabId: tab.id,
       });
-  
-      const res = results?.[0]?.result;
+
       if (!res) {
         showResult('No result returned.', 'error');
         return;

@@ -91,6 +91,17 @@
   <body>
     <h3 style="margin: 0 0 8px 0;">Page Inspector</h3>
 
+    <div style="margin-bottom: 12px;">
+      <button id="mic-permission-btn">Enable Microphone</button>
+      <div id="mic-status" style="font-size: 11px; color: #555; margin-top: 6px;">
+        Microphone permission has not been requested yet.
+      </div>
+    </div>
+
+    <div id="target-tab-status" style="font-size: 11px; color: #555; margin-bottom: 12px;">
+      Looking for an active browser tab...
+    </div>
+
     <button id="action-btn" class="primary">Extract Page Context</button>
     <div id="status">Ready.</div>
     <div id="output"></div>
