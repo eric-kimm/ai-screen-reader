@@ -418,6 +418,11 @@ function createPanel() {
           path.unshift('#' + current.id);
           break;
         }
+        // Include up to 3 classes in the selector path for specificity
+        const classes = [...current.classList].slice(0, 3);
+        if (classes.length > 0) {
+          segment += '.' + classes.join('.');
+        }
         const siblings = [...(current.parentNode?.children ?? [])].filter(
           s => s.tagName === current.tagName
         );
@@ -431,25 +436,57 @@ function createPanel() {
     }
   
     function getLabel(el) {
+      // aria-label is highest priority
       if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
+      // aria-labelledby points to another element's text
+      if (el.getAttribute('aria-labelledby')) {
+        const labelEl = doc.getElementById(el.getAttribute('aria-labelledby'));
+        if (labelEl) return labelEl.textContent.trim();
+      }
+      // aria-describedby as fallback description
+      if (el.getAttribute('aria-describedby')) {
+        const descEl = doc.getElementById(el.getAttribute('aria-describedby'));
+        if (descEl) return descEl.textContent.trim();
+      }
       if (el.getAttribute('placeholder')) return el.getAttribute('placeholder');
       if (el.getAttribute('title')) return el.getAttribute('title');
+      if (el.getAttribute('alt')) return el.getAttribute('alt');
+      // Explicit label element
       if (el.id) {
         const label = doc.querySelector('label[for="' + el.id + '"]');
         if (label) return label.textContent.trim();
       }
+      // Wrapping label
       if (el.closest('label')) return el.closest('label').textContent.trim();
-      if (el.tagName === 'A') {
-        const text = el.innerText?.trim() || el.textContent?.trim();
-        if (text) return text.slice(0, 80);
-        const img = el.querySelector('img');
-        if (img?.getAttribute('alt')) return img.getAttribute('alt');
-        const href = el.getAttribute('href');
-        if (href) return href.slice(0, 80);
+      // For links and buttons, check for img alt or aria child
+      if (el.tagName === 'A' || el.tagName === 'BUTTON') {
+        const img = el.querySelector('img[alt]');
+        if (img) return img.getAttribute('alt');
+        const ariaChild = el.querySelector('[aria-label]');
+        if (ariaChild) return ariaChild.getAttribute('aria-label');
       }
-      if (el.textContent.trim()) return el.textContent.trim().slice(0, 80);
+      // data-testid and similar are useful for identification even if not visible labels
+      if (el.getAttribute('data-testid')) return el.getAttribute('data-testid');
+      if (el.getAttribute('data-id')) return el.getAttribute('data-id');
+      if (el.getAttribute('data-name')) return el.getAttribute('data-name');
+      // Text content
+      const text = el.innerText?.trim() || el.textContent?.trim();
+      if (text) return text.slice(0, 120);
       if (el.getAttribute('value')) return el.getAttribute('value');
+      if (el.getAttribute('name')) return el.getAttribute('name');
       return null;
+    }
+  
+    // Collect every attribute that could help identify or interact with an element
+    function getAllAttributes(el) {
+      const attrs = {};
+      for (const attr of el.attributes) {
+        // Skip style and event handlers (too noisy), keep everything else
+        if (attr.name === 'style') continue;
+        if (attr.name.startsWith('on')) continue;
+        attrs[attr.name] = attr.value;
+      }
+      return attrs;
     }
   
     function resolveUrl(href) {
@@ -458,32 +495,29 @@ function createPanel() {
       catch (e) { return href; }
     }
   
-    // Walk the entire DOM tree and extract all readable text with structure
     function extractAllContent(node, depth) {
       if (!node) return '';
       depth = depth || 0;
   
-      // Skip hidden elements
       if (node.nodeType === Node.ELEMENT_NODE) {
+        if (node.id === 'a11y-assistant-panel') return '';
+        if (node.closest && node.closest('#a11y-assistant-panel')) return '';
         const style = node.getAttribute('style') || '';
         if (style.includes('display:none') || style.includes('display: none') ||
             style.includes('visibility:hidden') || style.includes('visibility: hidden')) {
           return '';
         }
-        const ariaHidden = node.getAttribute('aria-hidden');
-        if (ariaHidden === 'true') return '';
+        if (node.getAttribute('aria-hidden') === 'true') return '';
       }
   
       if (node.nodeType === Node.TEXT_NODE) {
         const text = node.textContent.trim();
-        return text ? text : '';
+        return text || '';
       }
   
       if (node.nodeType !== Node.ELEMENT_NODE) return '';
   
       const tag = node.tagName.toLowerCase();
-  
-      // Skip these entirely
       const skipTags = ['script', 'style', 'noscript', 'svg', 'head'];
       if (skipTags.includes(tag)) return '';
   
@@ -494,41 +528,24 @@ function createPanel() {
       const childText = children.join(' ').replace(/\s+/g, ' ').trim();
       if (!childText) return '';
   
-      // Format based on tag type
       switch (tag) {
         case 'h1': return '\n# ' + childText + '\n';
         case 'h2': return '\n## ' + childText + '\n';
         case 'h3': return '\n### ' + childText + '\n';
-        case 'h4':
-        case 'h5':
-        case 'h6': return '\n#### ' + childText + '\n';
-  
+        case 'h4': case 'h5': case 'h6': return '\n#### ' + childText + '\n';
         case 'p': return '\n' + childText + '\n';
         case 'br': return '\n';
-  
         case 'li': return '\n- ' + childText;
-        case 'ul':
-        case 'ol': return '\n' + childText + '\n';
-  
-        case 'strong':
-        case 'b': return '**' + childText + '**';
-  
-        case 'em':
-        case 'i': return '_' + childText + '_';
-  
+        case 'ul': case 'ol': return '\n' + childText + '\n';
+        case 'strong': case 'b': return '**' + childText + '**';
+        case 'em': case 'i': return '_' + childText + '_';
         case 'code': return '`' + childText + '`';
         case 'pre': return '\n```\n' + childText + '\n```\n';
-  
         case 'blockquote': return '\n> ' + childText + '\n';
-  
-        // Tables — preserve structure
         case 'th': return '[' + childText + ']';
         case 'td': return childText;
         case 'tr': {
-          const cells = [...node.children].map(td => {
-            const t = td.textContent.trim();
-            return t;
-          }).filter(Boolean);
+          const cells = [...node.children].map(td => td.textContent.trim()).filter(Boolean);
           return '\n| ' + cells.join(' | ') + ' |';
         }
         case 'table': {
@@ -538,57 +555,35 @@ function createPanel() {
           });
           return '\n' + rows.join('\n') + '\n';
         }
-  
-        // Spans and divs — pass through but keep text
-        case 'span':
-        case 'div':
-        case 'section':
-        case 'article':
-        case 'main':
-        case 'aside':
-        case 'header':
-        case 'footer': return childText;
-  
-        // Definition lists
         case 'dt': return '\n**' + childText + '**';
         case 'dd': return '\n  ' + childText;
         case 'dl': return '\n' + childText + '\n';
-  
-        // Labels and data elements
         case 'label': return '\n[Label: ' + childText + ']';
         case 'caption': return '\n[Caption: ' + childText + ']';
         case 'figcaption': return '\n[Fig: ' + childText + ']';
         case 'time': return childText;
         case 'abbr': return childText + (node.getAttribute('title') ? ' (' + node.getAttribute('title') + ')' : '');
-  
-        // Form elements — show their current value/state
         case 'input': {
           const type = node.getAttribute('type') || 'text';
-          const val = node.getAttribute('value') || '';
-          const placeholder = node.getAttribute('placeholder') || '';
-          const labelText = getLabel(node) || placeholder || type;
           if (type === 'hidden') return '';
+          const val = node.getAttribute('value') || '';
+          const labelText = getLabel(node) || type;
           if (type === 'checkbox' || type === 'radio') {
             const checked = node.hasAttribute('checked') ? '✓' : '○';
             return ' ' + checked + ' ' + labelText;
           }
           return '[Input: ' + labelText + (val ? ' = "' + val + '"' : '') + ']';
         }
-        case 'textarea': {
-          const labelText = getLabel(node) || 'textarea';
-          return '[Textarea: ' + labelText + ']';
-        }
+        case 'textarea': return '[Textarea: ' + (getLabel(node) || 'textarea') + ']';
         case 'select': {
-          const labelText = getLabel(node) || 'select';
           const opts = [...node.options].map(o => o.text).join(', ');
-          return '[Select: ' + labelText + ' (' + opts + ')]';
+          return '[Select: ' + (getLabel(node) || 'select') + ' (' + opts + ')]';
         }
         case 'button': return '[Button: ' + childText + ']';
         case 'a': {
           const href = resolveUrl(node.getAttribute('href'));
-          return childText + (href ? ' (' + href + ')' : '');
+          return childText + (href && !href.endsWith('#') ? ' (' + href + ')' : '');
         }
-  
         default: return childText;
       }
     }
@@ -596,99 +591,212 @@ function createPanel() {
     const context = {
       url,
       title: doc.title,
+      pageContent: '',
       sections: [],
       interactive: [],
       forms: [],
       inlineLinks: [],
-      pageContent: '',   // 👈 new — full readable content
     };
   
-    // Full content extraction
     context.pageContent = extractAllContent(doc.body)
       .replace(/\n{3,}/g, '\n\n')
       .replace(/  +/g, ' ')
       .trim();
   
     // Sections
-    doc.querySelectorAll('h1, h2, h3, h4, main, article, section, header').forEach(el => {
+    doc.querySelectorAll('h1, h2, h3, h4, main, article, section, header, nav, footer, aside').forEach(el => {
+      if (el.closest('#a11y-assistant-panel')) return;
       const text = el.textContent.trim().slice(0, 120);
       if (text) {
         context.sections.push({
           tag: el.tagName.toLowerCase(),
           text,
           selector: getSelector(el),
+          id: el.id || null,
+          classes: [...el.classList].join(' ') || null,
+          role: el.getAttribute('role') || null,
         });
       }
     });
   
-    // Inline links
+    // Inline links — expanded to all contexts
     doc.querySelectorAll('a[href]').forEach(el => {
-      const parent = el.parentElement;
-      if (!parent) return;
-      const tag = parent.tagName.toLowerCase();
-      const isInlineContext = ['p', 'li', 'td', 'th', 'span', 'div', 'article',
-                               'section', 'blockquote', 'dd', 'dt'].includes(tag);
+      if (el.closest('#a11y-assistant-panel')) return;
       const href = el.getAttribute('href');
       const linkText = el.innerText?.trim() || el.textContent?.trim();
       const resolvedHref = resolveUrl(href);
-      const surroundingText = parent.innerText?.trim().slice(0, 150) ||
-                              parent.textContent?.trim().slice(0, 150);
-      if (isInlineContext && linkText && href) {
+      const parent = el.parentElement;
+      const surroundingText = parent?.innerText?.trim().slice(0, 200) || '';
+  
+      if (linkText && href) {
         context.inlineLinks.push({
-          text: linkText.slice(0, 80),
+          text: linkText.slice(0, 120),
           href: resolvedHref,
           selector: getSelector(el),
-          context: surroundingText,
+          id: el.id || null,
+          classes: [...el.classList].join(' ') || null,
+          allAttributes: getAllAttributes(el),
+          surroundingText,
         });
       }
     });
   
-    // Interactive elements
+    // Interactive elements — comprehensive selector list
     const interactiveSelectors = [
-      'button', 'a[href]', 'input', 'textarea', 'select',
-      '[role="button"]', '[role="tab"]', '[role="menuitem"]',
-      '[role="checkbox"]', '[role="switch"]', '[onclick]', '[tabindex]',
+      'button',
+      'a[href]',
+      'input',
+      'textarea',
+      'select',
+      '[role="button"]',
+      '[role="tab"]',
+      '[role="menuitem"]',
+      '[role="menuitemcheckbox"]',
+      '[role="menuitemradio"]',
+      '[role="checkbox"]',
+      '[role="radio"]',
+      '[role="switch"]',
+      '[role="option"]',
+      '[role="combobox"]',
+      '[role="listbox"]',
+      '[role="slider"]',
+      '[role="spinbutton"]',
+      '[role="searchbox"]',
+      '[role="link"]',
+      '[role="treeitem"]',
+      '[role="gridcell"]',
+      '[role="rowheader"]',
+      '[role="columnheader"]',
+      '[onclick]',
+      '[tabindex]',
+      '[contenteditable="true"]',
     ];
   
     doc.querySelectorAll(interactiveSelectors.join(',')).forEach(el => {
+      if (el.closest('#a11y-assistant-panel')) return;
+  
       const label = getLabel(el);
       if (!label) return;
+  
+      const allAttrs = getAllAttributes(el);
+  
       const item = {
         tag: el.tagName.toLowerCase(),
-        type: el.getAttribute('type') ?? el.getAttribute('role') ?? null,
         label,
         selector: getSelector(el),
+        // Identity attributes
+        id: el.id || null,
+        name: el.getAttribute('name') || null,
+        classes: [...el.classList].join(' ') || null,
+        type: el.getAttribute('type') || null,
+        role: el.getAttribute('role') || null,
+        // All raw attributes for full context
+        allAttributes: allAttrs,
       };
-      if (el.tagName === 'SELECT') {
-        item.options = [...el.options].map(o => ({ value: o.value, text: o.text }));
-      }
-      if (el.tagName === 'INPUT') {
-        item.inputType = el.getAttribute('type') ?? 'text';
-        if (el.getAttribute('value')) item.currentValue = el.getAttribute('value');
-      }
+  
+      // Tag-specific extras
       if (el.tagName === 'A') {
         item.href = resolveUrl(el.getAttribute('href'));
+        item.target = el.getAttribute('target') || null;
+        item.rel = el.getAttribute('rel') || null;
+        item.download = el.getAttribute('download') || null;
       }
+  
+      if (el.tagName === 'INPUT') {
+        item.inputType = el.getAttribute('type') || 'text';
+        item.placeholder = el.getAttribute('placeholder') || null;
+        item.currentValue = el.value || el.getAttribute('value') || null;
+        item.checked = (el.type === 'checkbox' || el.type === 'radio') ? el.checked : null;
+        item.required = el.hasAttribute('required');
+        item.disabled = el.hasAttribute('disabled');
+        item.readonly = el.hasAttribute('readonly');
+        item.min = el.getAttribute('min') || null;
+        item.max = el.getAttribute('max') || null;
+        item.step = el.getAttribute('step') || null;
+        item.pattern = el.getAttribute('pattern') || null;
+        item.maxlength = el.getAttribute('maxlength') || null;
+        item.autocomplete = el.getAttribute('autocomplete') || null;
+      }
+  
+      if (el.tagName === 'TEXTAREA') {
+        item.placeholder = el.getAttribute('placeholder') || null;
+        item.currentValue = el.value || null;
+        item.required = el.hasAttribute('required');
+        item.disabled = el.hasAttribute('disabled');
+        item.readonly = el.hasAttribute('readonly');
+        item.maxlength = el.getAttribute('maxlength') || null;
+        item.rows = el.getAttribute('rows') || null;
+        item.cols = el.getAttribute('cols') || null;
+      }
+  
+      if (el.tagName === 'SELECT') {
+        item.currentValue = el.value || null;
+        item.multiple = el.hasAttribute('multiple');
+        item.required = el.hasAttribute('required');
+        item.disabled = el.hasAttribute('disabled');
+        item.options = [...el.options].map(o => ({
+          value: o.value,
+          text: o.text.trim(),
+          selected: o.selected,
+          disabled: o.disabled,
+        }));
+      }
+  
+      if (el.tagName === 'BUTTON') {
+        item.buttonType = el.getAttribute('type') || 'button';
+        item.disabled = el.hasAttribute('disabled');
+        item.form = el.getAttribute('form') || null;
+      }
+  
+      // Full ARIA state
+      item.aria = {};
+      for (const attr of el.attributes) {
+        if (attr.name.startsWith('aria-')) {
+          item.aria[attr.name] = attr.value;
+        }
+      }
+  
+      // Data attributes
+      item.data = {};
+      for (const attr of el.attributes) {
+        if (attr.name.startsWith('data-')) {
+          item.data[attr.name] = attr.value;
+        }
+      }
+  
       context.interactive.push(item);
     });
   
     // Forms
     doc.querySelectorAll('form').forEach(form => {
+      if (form.closest('#a11y-assistant-panel')) return;
       const fields = [];
       form.querySelectorAll('input, textarea, select, button').forEach(el => {
+        if (el.getAttribute('type') === 'hidden') return;
         fields.push({
           tag: el.tagName.toLowerCase(),
-          type: el.getAttribute('type') ?? null,
-          name: el.getAttribute('name') ?? null,
+          type: el.getAttribute('type') || null,
+          name: el.getAttribute('name') || null,
+          id: el.id || null,
+          classes: [...el.classList].join(' ') || null,
           label: getLabel(el),
           selector: getSelector(el),
+          placeholder: el.getAttribute('placeholder') || null,
+          currentValue: el.value || el.getAttribute('value') || null,
           required: el.hasAttribute('required'),
+          disabled: el.hasAttribute('disabled'),
+          allAttributes: getAllAttributes(el),
         });
       });
+  
       context.forms.push({
         selector: getSelector(form),
-        action: form.getAttribute('action') ?? null,
-        method: form.getAttribute('method') ?? 'get',
+        id: form.id || null,
+        name: form.getAttribute('name') || null,
+        classes: [...form.classList].join(' ') || null,
+        action: form.getAttribute('action') || null,
+        method: form.getAttribute('method') || 'get',
+        allAttributes: getAllAttributes(form),
         fields,
       });
     });
@@ -698,122 +806,167 @@ function createPanel() {
   
   function formatContextForModel(context) {
 
-    // Universal noise filters
+    function formatElement(el) {
+      const lines = [];
+      const tagStr = el.role ? el.tag + '[role=' + el.role + ']' : el.type ? el.tag + '[' + el.type + ']' : el.tag;
+      lines.push('[' + tagStr + '] "' + el.label + '"');
   
-    const isUselessHref = (href) => {
-      if (!href) return true;
-      if (href.endsWith('#')) return true;
-      if (href.includes('grades#')) return true;
-      if (href.startsWith('javascript:')) return true;
-      return false;
-    };
+      if (el.selector)   lines.push('  selector:    ' + el.selector);
+      if (el.id)         lines.push('  id:          ' + el.id);
+      if (el.name)       lines.push('  name:        ' + el.name);
+      if (el.classes)    lines.push('  classes:     ' + el.classes);
+      if (el.href)       lines.push('  href:        ' + el.href);
+      if (el.target)     lines.push('  target:      ' + el.target);
+      if (el.rel)        lines.push('  rel:         ' + el.rel);
+      if (el.download)   lines.push('  download:    ' + el.download);
+      if (el.placeholder) lines.push('  placeholder: ' + el.placeholder);
+      if (el.currentValue !== null && el.currentValue !== undefined && el.currentValue !== '') {
+        lines.push('  value:       "' + el.currentValue + '"');
+      }
+      if (el.checked !== null && el.checked !== undefined) {
+        lines.push('  checked:     ' + el.checked);
+      }
+      if (el.required)   lines.push('  required:    true');
+      if (el.disabled)   lines.push('  disabled:    true');
+      if (el.readonly)   lines.push('  readonly:    true');
+      if (el.multiple)   lines.push('  multiple:    true');
+      if (el.buttonType && el.buttonType !== 'button') lines.push('  button-type: ' + el.buttonType);
+      if (el.min || el.max) lines.push('  range:       ' + (el.min || '?') + ' to ' + (el.max || '?'));
+      if (el.step)       lines.push('  step:        ' + el.step);
+      if (el.pattern)    lines.push('  pattern:     ' + el.pattern);
+      if (el.maxlength)  lines.push('  maxlength:   ' + el.maxlength);
+      if (el.autocomplete) lines.push('  autocomplete: ' + el.autocomplete);
+      if (el.rows)       lines.push('  rows:        ' + el.rows);
+      if (el.form)       lines.push('  form:        ' + el.form);
   
-    const isUselessElement = (el) => {
-      // Skip presentation/decorative elements
-      if (el.type === 'presentation') return true;
-      // Skip elements whose label is just a number or single character
-      if (/^[\d\s]$/.test(el.label?.trim())) return true;
-      // Skip span wrappers that aren't real controls
-      if (el.tag === 'span' && !['button', 'checkbox', 'radio', 'switch', 'tab'].includes(el.type)) return true;
-      // Skip extension's own elements
-      if ((el.selector || '').includes('a11y-')) return true;
-      return false;
-    };
+      // ARIA attributes
+      if (el.aria && Object.keys(el.aria).length > 0) {
+        lines.push('  aria:        ' + Object.entries(el.aria).map(([k, v]) => k + '="' + v + '"').join(' '));
+      }
   
-    // Deduplicate — if an element appears in both interactive and inlineLinks, keep only interactive
-    const interactiveSelectors = new Set(context.interactive.map(el => el.selector));
+      // Data attributes
+      if (el.data && Object.keys(el.data).length > 0) {
+        lines.push('  data:        ' + Object.entries(el.data).map(([k, v]) => k + '="' + v + '"').join(' '));
+      }
   
-    // Format interactive elements more concisely ---
-    const interactive = context.interactive
-      .filter(el => !isUselessElement(el))
-      .map(el => {
-        // Simplify tag display — only show type if it adds information
-        const meaningfulTypes = ['checkbox', 'radio', 'submit', 'password', 'email', 'number', 'file', 'tab', 'switch'];
-        const showType = el.type && meaningfulTypes.includes(el.type);
-        const tagStr = showType ? el.tag + '[' + el.type + ']' : el.tag;
+      // All other attributes not already shown
+      if (el.allAttributes) {
+        const alreadyShown = new Set([
+          'id', 'name', 'class', 'type', 'role', 'href', 'target', 'rel',
+          'placeholder', 'value', 'checked', 'required', 'disabled', 'readonly',
+          'multiple', 'min', 'max', 'step', 'pattern', 'maxlength', 'autocomplete',
+          'rows', 'cols', 'form', 'download', 'tabindex',
+        ]);
+        const extra = Object.entries(el.allAttributes)
+          .filter(([k]) => !alreadyShown.has(k) && !k.startsWith('aria-') && !k.startsWith('data-'))
+          .map(([k, v]) => k + '="' + v + '"')
+          .join(' ');
+        if (extra) lines.push('  other:       ' + extra);
+      }
   
-        let line = '[' + tagStr + '] "' + el.label + '" → ' + el.selector;
+      // Select options
+      if (el.options && el.options.length > 0) {
+        const opts = el.options
+          .map(o => (o.selected ? '▶ ' : '') + '"' + o.text + '"' + (o.value !== o.text ? ' (' + o.value + ')' : '') + (o.disabled ? ' [disabled]' : ''))
+          .join(', ');
+        lines.push('  options:     ' + opts);
+      }
   
-        // Only show href if it's meaningful
-        if (el.href && !isUselessHref(el.href)) {
-          line += ' → ' + el.href;
-        }
+      return lines.join('\n');
+    }
   
-        // Options for selects
-        if (el.options && el.options.length > 0) {
-          line += '\n  options: ' + el.options.map(o => o.text).join(', ');
-        }
+    function formatField(field) {
+      const tagStr = field.type ? field.tag + '[' + field.type + ']' : field.tag;
+      const lines = ['  [' + tagStr + '] "' + (field.label || field.name || 'unlabeled') + '"'];
+      if (field.selector)     lines.push('    selector:    ' + field.selector);
+      if (field.id)           lines.push('    id:          ' + field.id);
+      if (field.name)         lines.push('    name:        ' + field.name);
+      if (field.classes)      lines.push('    classes:     ' + field.classes);
+      if (field.placeholder)  lines.push('    placeholder: ' + field.placeholder);
+      if (field.currentValue) lines.push('    value:       "' + field.currentValue + '"');
+      if (field.required)     lines.push('    required:    true');
+      if (field.disabled)     lines.push('    disabled:    true');
+      if (field.allAttributes) {
+        const alreadyShown = new Set(['id', 'name', 'class', 'type', 'placeholder', 'value', 'required', 'disabled']);
+        const extra = Object.entries(field.allAttributes)
+          .filter(([k]) => !alreadyShown.has(k))
+          .map(([k, v]) => k + '="' + v + '"')
+          .join(' ');
+        if (extra) lines.push('    other:       ' + extra);
+      }
+      return lines.join('\n');
+    }
   
-        // Current value if set
-        if (el.currentValue) {
-          line += '\n  value: "' + el.currentValue + '"';
-        }
-  
+    const sections = context.sections
+      .map(s => {
+        let line = '[' + s.tag + '] "' + s.text + '"';
+        if (s.selector) line += '\n  selector: ' + s.selector;
+        if (s.id)       line += '\n  id:       ' + s.id;
+        if (s.classes)  line += '\n  classes:  ' + s.classes;
+        if (s.role)     line += '\n  role:     ' + s.role;
         return line;
-      })
-      .join('\n');
-  
-    // Format inline links concisely, skip duplicates and useless hrefs ---
-    const inlineLinks = context.inlineLinks
-      .filter(link => !interactiveSelectors.has(link.selector))
-      .filter(link => !isUselessHref(link.href))
-      .filter(link => link.text && link.text.length > 1)
-      .map(link => '"' + link.text + '" → ' + link.href)
-      .join('\n');
-  
-    // Format forms, skip hidden/template ones ---
-    const forms = context.forms
-      .filter(f => {
-        // Skip forms with no visible fields
-        const visibleFields = f.fields.filter(field =>
-          field.type !== 'hidden' && !isUselessElement(field)
-        );
-        return visibleFields.length > 0;
-      })
-      .map(f => {
-        const fields = f.fields
-          .filter(field => field.type !== 'hidden' && !isUselessElement(field))
-          .map(field => {
-            const meaningfulTypes = ['checkbox', 'radio', 'submit', 'password', 'email', 'number', 'file'];
-            const showType = field.type && meaningfulTypes.includes(field.type);
-            const tagStr = showType ? field.tag + '[' + field.type + ']' : field.tag;
-            const label = field.label ?? field.name ?? 'unlabeled';
-            const req = field.required ? ' *' : '';
-            return '  [' + tagStr + '] "' + label + '" → ' + field.selector + req;
-          })
-          .join('\n');
-        const action = f.action ? ' → ' + f.action : '';
-        return '[form] ' + f.selector + action + '\n' + fields;
       })
       .join('\n\n');
   
-    // Page sections (keep as-is, already clean) ---
-    const sections = context.sections
-      .map(s => '[' + s.tag + '] "' + s.text + '" → ' + s.selector)
-      .join('\n');
+    const interactive = context.interactive
+      .filter(el => !(el.selector || '').includes('a11y-'))
+      .map(formatElement)
+      .join('\n\n');
   
-    // Assemble, skip empty sections ---
+    const inlineLinks = context.inlineLinks
+      .filter(link => !(link.selector || '').includes('a11y-'))
+      .map(link => {
+        const lines = ['"' + link.text + '" → ' + link.href];
+        if (link.selector) lines.push('  selector:  ' + link.selector);
+        if (link.id)       lines.push('  id:        ' + link.id);
+        if (link.classes)  lines.push('  classes:   ' + link.classes);
+        if (link.allAttributes) {
+          const alreadyShown = new Set(['id', 'class', 'href']);
+          const extra = Object.entries(link.allAttributes)
+            .filter(([k]) => !alreadyShown.has(k))
+            .map(([k, v]) => k + '="' + v + '"')
+            .join(' ');
+          if (extra) lines.push('  other:     ' + extra);
+        }
+        if (link.surroundingText) lines.push('  context:   "' + link.surroundingText.slice(0, 150) + '"');
+        return lines.join('\n');
+      })
+      .join('\n\n');
+  
+    const forms = context.forms
+      .filter(f => !(f.selector || '').includes('a11y-'))
+      .map(f => {
+        const header = ['[form] "' + (f.name || f.id || f.selector) + '"'];
+        if (f.selector) header.push('  selector: ' + f.selector);
+        if (f.id)       header.push('  id:       ' + f.id);
+        if (f.name)     header.push('  name:     ' + f.name);
+        if (f.classes)  header.push('  classes:  ' + f.classes);
+        if (f.action)   header.push('  action:   ' + f.action);
+        header.push('  method:   ' + f.method);
+        if (f.allAttributes) {
+          const alreadyShown = new Set(['id', 'name', 'class', 'action', 'method']);
+          const extra = Object.entries(f.allAttributes)
+            .filter(([k]) => !alreadyShown.has(k))
+            .map(([k, v]) => k + '="' + v + '"')
+            .join(' ');
+          if (extra) header.push('  other:    ' + extra);
+        }
+        const fields = f.fields.map(formatField).join('\n');
+        return header.join('\n') + '\n' + fields;
+      })
+      .join('\n\n');
+  
     const parts = [
       'PAGE CONTEXT\n============',
       'URL: ' + context.url,
       'Title: ' + context.title,
     ];
   
-    if (context.pageContent) {
-      parts.push('\nPAGE CONTENT\n------------\n' + context.pageContent);
-    }
-    if (sections) {
-      parts.push('\nPAGE SECTIONS\n-------------\n' + sections);
-    }
-    if (interactive) {
-      parts.push('\nINTERACTIVE ELEMENTS\n--------------------\n' + interactive);
-    }
-    if (inlineLinks) {
-      parts.push('\nINLINE LINKS\n------------\n' + inlineLinks);
-    }
-    if (forms) {
-      parts.push('\nFORMS\n-----\n' + forms);
-    }
+    if (context.pageContent) parts.push('\nPAGE CONTENT\n------------\n' + context.pageContent);
+    if (sections)    parts.push('\nPAGE SECTIONS\n-------------\n' + sections);
+    if (interactive) parts.push('\nINTERACTIVE ELEMENTS\n--------------------\n' + interactive);
+    if (inlineLinks) parts.push('\nINLINE LINKS\n------------\n' + inlineLinks);
+    if (forms)       parts.push('\nFORMS\n-----\n' + forms);
   
     return parts.join('\n');
   }
