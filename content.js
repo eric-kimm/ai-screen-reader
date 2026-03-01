@@ -782,7 +782,7 @@ function createPanel() {
   //  Keyboard shortcut to toggle panel 
   
   document.addEventListener('keydown', (e) => {
-    if (e.shiftKey && e.key === ' ') {
+    if (e.shiftKey && e.key === 'z') {
       const tag = document.activeElement?.tagName?.toLowerCase();
       const isTyping = tag === 'textarea' || tag === 'input' || document.activeElement?.isContentEditable;
       if (isTyping) return; // don't toggle panel if typing
