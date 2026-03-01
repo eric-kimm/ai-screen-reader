@@ -1,4 +1,4 @@
-//  Panel UI 
+// ---- Panel UI ----
 
 function createPanel() {
     if (document.getElementById('a11y-assistant-panel')) return;
@@ -35,7 +35,39 @@ function createPanel() {
           <div id="a11y-status" style="font-size: 11px; color: #555; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
             Ready.
           </div>
-          
+        </div>
+  
+        <!-- Voice input section -->
+        <div style="margin-bottom: 10px;">
+          <div style="font-size: 12px; font-weight: bold; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+            🎤 Voice Command
+            <span id="a11y-mic-indicator" style="
+              font-size: 11px;
+              font-weight: normal;
+              color: #aaa;
+            ">Press Space to start</span>
+          </div>
+          <div style="position: relative;">
+            <div id="a11y-voice-display" style="
+              min-height: 48px;
+              background: #f4f4f4;
+              border: 1px solid #ddd;
+              border-radius: 4px;
+              padding: 8px 36px 8px 8px;
+              font-size: 12px;
+              color: #333;
+              word-break: break-word;
+              line-height: 1.5;
+            ">Waiting for voice input...</div>
+            <div id="a11y-mic-icon" style="
+              position: absolute;
+              top: 50%;
+              right: 8px;
+              transform: translateY(-50%);
+              font-size: 18px;
+              pointer-events: none;
+            ">🎤</div>
+          </div>
         </div>
   
         <!-- Extract button -->
@@ -88,7 +120,6 @@ function createPanel() {
         <div style="display: flex; gap: 8px; margin-top: 8px;">
           <button id="a11y-run-btn" style="flex: 1; padding: 8px; background: #1a73e8; color: white; border: none; border-radius: 4px; cursor: pointer;">▶ Run Script</button>
           <button id="a11y-clear-btn" style="padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; background: #f9f9f9; cursor: pointer;">✕ Clear</button>
-          
         </div>
   
         <div id="a11y-console-result" style="
@@ -112,13 +143,14 @@ function createPanel() {
     return panel;
   }
   
-  //  Panel listeners 
+  // ---- Panel listeners ----
   
   function attachPanelListeners() {
   
-    
-  
-
+    // Close
+    document.getElementById('a11y-close-btn').addEventListener('click', () => {
+      document.getElementById('a11y-assistant-panel').style.display = 'none';
+    });
   
     // Extract button
     document.getElementById('a11y-extract-btn').addEventListener('click', () => {
@@ -133,15 +165,15 @@ function createPanel() {
         const formatted = formatContextForModel(context);
         const chunks = chunkText(formatted, 12000);
   
-        status.textContent = ' Extracted | ' + formatted.length + ' chars | ' + chunks.length + ' chunk(s)';
+        status.textContent = 'Extracted | ' + formatted.length + ' chars | ' + chunks.length + ' chunk(s)';
         output.style.display = 'block';
         output.textContent = formatted;
       } catch (e) {
-        status.textContent = ' Extraction failed: ' + e.message;
+        status.textContent = 'Extraction failed: ' + e.message;
       }
     });
   
-    // Run script — sends to background to bypass CSP
+    // Run script
     document.getElementById('a11y-run-btn').addEventListener('click', () => {
       const script = document.getElementById('a11y-script-input').value.trim();
   
@@ -154,18 +186,18 @@ function createPanel() {
   
       chrome.runtime.sendMessage({ action: 'runScript', script }, (response) => {
         if (chrome.runtime.lastError) {
-          showConsoleResult(' ' + chrome.runtime.lastError.message, 'error');
-          document.getElementById('a11y-status').textContent = ' Script failed.';
+          showConsoleResult('❌ ' + chrome.runtime.lastError.message, 'error');
+          document.getElementById('a11y-status').textContent = 'Script failed.';
           return;
         }
         if (!response) {
-          showConsoleResult(' No response from background.', 'error');
-          document.getElementById('a11y-status').textContent = ' No response.';
+          showConsoleResult('❌ No response from background.', 'error');
+          document.getElementById('a11y-status').textContent = 'No response.';
           return;
         }
-        document.getElementById('a11y-status').textContent = response.status === 'ok' ? ' Script ran.' : ' Script error.';
+        document.getElementById('a11y-status').textContent = response.status === 'ok' ? 'Script ran.' : 'Script error.';
         showConsoleResult(
-          response.status === 'ok' ? ' ' + response.value : ' ' + response.value,
+          response.status === 'ok' ? '✅ ' + response.value : '❌ ' + response.value,
           response.status
         );
       });
@@ -179,8 +211,6 @@ function createPanel() {
       resultBox.textContent = '';
     });
   
-    
-  
     // Enter to run script
     document.getElementById('a11y-script-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -189,16 +219,120 @@ function createPanel() {
       }
     });
   
-  
-
-
-  
-    
+    // ---- Speech to text ----
+    setupSpeechToText();
   }
   
+  // ---- Speech to text ----
   
+  function setupSpeechToText() {
+    const voiceDisplay = document.getElementById('a11y-voice-display');
+    const micIndicator = document.getElementById('a11y-mic-indicator');
+    const micIcon = document.getElementById('a11y-mic-icon');
   
+    if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+      micIndicator.textContent = 'Speech recognition not supported';
+      return;
+    }
   
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+  
+    recognition.continuous = true;      // keep listening until we stop it
+    recognition.interimResults = true;  // show words as they come in
+    recognition.lang = 'en-US';
+  
+    let isListening = false;
+    let finalTranscript = '';
+  
+    function startListening() {
+      isListening = true;
+      finalTranscript = '';
+      voiceDisplay.textContent = 'Listening...';
+      voiceDisplay.style.borderColor = '#f44336';
+      voiceDisplay.style.background = '#fff5f5';
+      micIndicator.textContent = 'Press Space to stop';
+      micIndicator.style.color = '#f44336';
+      micIcon.textContent = '🔴';
+      document.getElementById('a11y-status').textContent = '🎤 Listening...';
+      recognition.start();
+    }
+  
+    function stopListening() {
+      isListening = false;
+      recognition.stop();
+      voiceDisplay.style.borderColor = '#4caf50';
+      voiceDisplay.style.background = '#f5fff5';
+      micIndicator.textContent = 'Press Space to start';
+      micIndicator.style.color = '#aaa';
+      micIcon.textContent = '🎤';
+      document.getElementById('a11y-status').textContent = '✅ Voice input captured.';
+    }
+  
+    recognition.onresult = (e) => {
+      let interim = '';
+      finalTranscript = '';
+      for (let i = 0; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          finalTranscript += e.results[i][0].transcript;
+        } else {
+          interim += e.results[i][0].transcript;
+        }
+      }
+      // Show interim in grey, final in black
+      voiceDisplay.innerHTML =
+        '<span style="color:#333">' + finalTranscript + '</span>' +
+        '<span style="color:#aaa">' + interim + '</span>';
+    };
+  
+    recognition.onerror = (e) => {
+      if (e.error === 'not-allowed') {
+        micIndicator.textContent = 'Microphone permission denied';
+        micIndicator.style.color = '#f44336';
+      } else if (e.error !== 'aborted') {
+        document.getElementById('a11y-status').textContent = '❌ Mic error: ' + e.error;
+      }
+      isListening = false;
+      micIcon.textContent = '🎤';
+      micIndicator.style.color = '#aaa';
+      micIndicator.textContent = 'Press Space to start';
+    };
+  
+    recognition.onend = () => {
+      // If we stopped intentionally, fire the callback with final text
+      if (!isListening && finalTranscript.trim()) {
+        onVoiceInputComplete(finalTranscript.trim());
+      }
+    };
+  
+    // Spacebar toggles listening — but only when not typing in a text field
+    document.addEventListener('keydown', (e) => {
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      const isTyping = tag === 'textarea' || tag === 'input' || document.activeElement?.isContentEditable;
+  
+      if (e.code === 'Space' && !isTyping) {
+        e.preventDefault();
+        if (isListening) {
+          stopListening();
+        } else {
+          startListening();
+        }
+      }
+    });
+  }
+  
+  // ---- Voice input callback — put your logic here ----
+  
+  function onVoiceInputComplete(text) {
+    console.log('Voice input received:', text);
+    document.getElementById('a11y-status').textContent = '💬 "' + text + '"';
+  
+    // TODO: replace this with your API call
+    // For now just echo it into the script input as a placeholder
+    document.getElementById('a11y-script-input').value = '// Voice command: ' + text;
+  }
+  
+  // ---- Utility functions ----
   
   function showConsoleResult(message, type) {
     const resultBox = document.getElementById('a11y-console-result');
@@ -207,11 +341,9 @@ function createPanel() {
     resultBox.style.display = 'block';
     resultBox.style.borderLeft = type === 'ok' ? '3px solid #4caf50' : '3px solid #f44336';
     resultBox.style.color = type === 'ok' ? '#d4d4d4' : '#ff6b6b';
-  
-    
   }
   
-  //  Extraction 
+  // ---- Extraction ----
   
   function extractInteractiveContext(html, url) {
     const parser = new DOMParser();
@@ -407,16 +539,16 @@ function createPanel() {
       'URL: ' + context.url + '\n' +
       'Title: ' + context.title + '\n\n' +
       'PAGE SECTIONS\n' +
-      '-\n' +
+      '-------------\n' +
       sections + '\n\n' +
       'INTERACTIVE ELEMENTS\n' +
-      '\n' +
+      '--------------------\n' +
       interactive + '\n\n' +
       'INLINE LINKS\n' +
-      '\n' +
+      '------------\n' +
       inlineLinks + '\n\n' +
       'FORMS\n' +
-      '-\n' +
+      '-----\n' +
       forms
     );
   }
@@ -436,10 +568,14 @@ function createPanel() {
     return chunks;
   }
   
-  // Keyboard shortcut 
+  // ---- Keyboard shortcut to toggle panel ----
   
   document.addEventListener('keydown', (e) => {
-    if ( e.shiftKey && e.key === ' ') {
+    if (e.shiftKey && e.key === ' ') {
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      const isTyping = tag === 'textarea' || tag === 'input' || document.activeElement?.isContentEditable;
+      if (isTyping) return; // don't toggle panel if typing
+  
       const existing = document.getElementById('a11y-assistant-panel');
       const panel = existing || createPanel();
       const isVisible = panel.style.display !== 'none';
@@ -450,11 +586,42 @@ function createPanel() {
     }
   });
   
-  // Auto-inject on page load 
+  // ---- Auto-inject on page load ----
   
   window.addEventListener('load', () => {
     createPanel();
+  
     const panel = document.getElementById('a11y-assistant-panel');
     if (panel) panel.style.display = 'block';
+  
+    try {
+      const rawHTML = document.documentElement.outerHTML;
+      const context = extractInteractiveContext(rawHTML, window.location.href);
+      const formatted = formatContextForModel(context);
+      const chunks = chunkText(formatted, 12000);
+  
+      console.log('=== PAGE CONTEXT EXTRACTED ===');
+      console.log('Chars:', formatted.length, '| Chunks:', chunks.length);
+      chunks.forEach((chunk, i) => {
+        console.log('--- Chunk ' + (i + 1) + ' of ' + chunks.length + ' ---');
+        console.log(chunk);
+      });
+  
+      const output = document.getElementById('a11y-output');
+      const status = document.getElementById('a11y-status');
+      if (output) {
+        output.style.display = 'block';
+        output.textContent = formatted;
+      }
+      if (status) {
+        status.textContent = 'Auto-extracted | ' + formatted.length + ' chars | ' + chunks.length + ' chunk(s)';
+      }
+  
+    } catch (e) {
+      console.error('Auto-extraction failed:', e.message);
+      const status = document.getElementById('a11y-status');
+      if (status) status.textContent = 'Auto-extraction failed: ' + e.message;
+    }
+  
     setTimeout(() => document.getElementById('a11y-extract-btn')?.focus(), 50);
   });
