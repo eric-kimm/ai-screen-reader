@@ -4,6 +4,9 @@ from pydantic import BaseModel
 import requests
 import os
 from dotenv import load_dotenv
+from elevenlabs.client import ElevenLabs
+from elevenlabs.play import play
+from . import voice
 
 load_dotenv()
 
@@ -20,7 +23,6 @@ app.add_middleware(
 # amd vLLM endpoint and model name
 AMD_ENDPOINT = os.getenv("AMD_VLLM_ENDPOINT")
 MODEL = "llava-hf/llava-1.5-7b-hf"
-
 
 class DescribeRequest(BaseModel):
     html: str       # full page html from chrome extension
@@ -72,6 +74,8 @@ async def describe_page(body: DescribeRequest):
     {body.html[:3000]}"""
 
     description = call_llm(prompt)
+    audio = voice.text_to_speech(description)
+    play(audio)
     return {"description": description}
 
 
@@ -94,6 +98,9 @@ async def handle_command(body: CommandRequest):
     {body.html[:3000]}"""
 
     result = call_llm(prompt)
+
+    audio = voice.text_to_speech(result)
+    play(audio)
     return {"action": result}
 
 
@@ -108,4 +115,7 @@ async def describe_element(body: ElementRequest):
     Element: {body.element}"""
 
     description = call_llm(prompt)
+    audio = voice.text_to_speech(description)
+    play(audio)
+
     return {"description": description}
